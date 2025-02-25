@@ -1,0 +1,63 @@
+name: Build e Deploy para AWS EKS
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'helm-chart/**'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do Código
+        uses: actions/checkout@v3
+
+      - name: Definir Ambiente (Dev ou Prod)
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "ENV=prod" >> $GITHUB_ENV
+          else
+            echo "ENV=dev" >> $GITHUB_ENV
+          fi
+
+      - name: Configurar Credenciais AWS
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Fazer Login no AWS ECR
+        run: |
+          aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | \
+          docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+
+      - name: Build e Push da Imagem Backend
+        run: |
+          docker build -t backend ./backend
+          docker tag backend:latest <AWS_ACCOUNT_ID>.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/backend:${{ env.ENV }}
+          docker push <AWS_ACCOUNT_ID>.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/backend:${{ env.ENV }}
+
+      - name: Build e Push da Imagem Frontend
+        run: |
+          docker build -t frontend ./frontend
+          docker tag frontend:latest <AWS_ACCOUNT_ID>.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/frontend:${{ env.ENV }}
+          docker push <AWS_ACCOUNT_ID>.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/frontend:${{ env.ENV }}
+
+      - name: Configurar kubectl para acessar o EKS
+        run: |
+          aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name app-cluster
+
+      - name: Deploy no Kubernetes com Helm
+        run: |
+          helm upgrade --install backend ./helm-chart -f helm-chart/values-${{ env.ENV }}.yaml
