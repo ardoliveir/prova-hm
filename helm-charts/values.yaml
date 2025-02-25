@@ -1,0 +1,15 @@
+replicaCount: 2
+
+image:
+  backend: "<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/backend"
+  frontend: "<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/frontend"
+
+service:
+  port: 80
+
+ingress:
+  enabled: true
+  host: "meudominio.com"
+  paths:
+    backend: /backend
+    frontend: /frontend
