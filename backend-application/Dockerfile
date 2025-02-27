@@ -1,24 +1,17 @@
-# Etapa 1: Construção do backend Flask
-FROM python:3.10-slim AS backend
+# Usar a imagem base oficial do Python
+FROM python:3.10-slim
 
+# Definir diretório de trabalho
 WORKDIR /app
 
+# Copiar arquivos necessários para o container
 COPY src/ /app/
-COPY requirements.txt /app/
 
+# Instalar dependências
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Etapa 2: Configuração do Nginx
-FROM nginx:latest
+# Expor a porta 8080
+EXPOSE 8080
 
-# Copiar a configuração do Nginx
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-
-# Copiar o backend Flask da primeira etapa
-COPY --from=backend /app /app
-
-# Expor a porta do Nginx (80)
-EXPOSE 80
-
-# Iniciar Nginx e Flask simultaneamente
-CMD ["sh", "-c", "gunicorn -b 0.0.0.0:8080 app:app & nginx -g 'daemon off;'"]
+# Comando para iniciar o servidor Flask usando Gunicorn
+CMD ["gunicorn", "-b", "0.0.0.0:8080", "app:app"]
