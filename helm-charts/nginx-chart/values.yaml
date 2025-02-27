@@ -1,4 +1,5 @@
-replicaCount: 2  # Corrigido de "w" para um número válido
+replicaCount: 1  
+
 
 image:
   repository: nginx
@@ -6,7 +7,7 @@ image:
   pullPolicy: IfNotPresent
 
 service:
-  type: ClusterIP  # Para ALB com target-type: ip, deve ser ClusterIP
+  type: ClusterIP
   port: 80
 
 ingress:
