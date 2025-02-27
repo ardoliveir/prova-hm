@@ -37,7 +37,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # 🔹 Login no Amazon ECR (somente se for necessário build)
+      # Login no Amazon ECR (somente se for necessário build)
       - name: Login to Amazon ECR
         if: env.SKIP_BUILD == 'false'
         run: |
