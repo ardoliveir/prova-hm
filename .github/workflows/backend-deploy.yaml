@@ -107,11 +107,26 @@ jobs:
         run: |
           aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name ${{ secrets.EKS_CLUSTER_NAME }}
 
-      # 🔹 Deploy para o Kubernetes via Helm (se necessário)
+
+      # 🔹 Deploy para o Kubernetes via Helm (se houver mudanças ou não existir release)
       - name: Deploy Backend to EKS using Helm
         if: env.SKIP_DEPLOY == 'false'
         run: |
-          helm upgrade --install backend ./helm-charts/nginx-chart \
-            --namespace default \
-            --set image.repository=${{ secrets.ECR_REGISTRY_BE }} \
-            --set image.tag=${{ env.IMAGE_TAG }}
+          RELEASE_NAME="backend"
+          NAMESPACE="default"
+
+          # Verifica se a release existe
+          if helm status $RELEASE_NAME -n $NAMESPACE > /dev/null 2>&1; then
+            echo "A release '$RELEASE_NAME' já existe. Aplicando upgrade..."
+            helm upgrade $RELEASE_NAME ./helm-charts/nginx-chart \
+              --namespace $NAMESPACE \
+              --set image.repository=${{ secrets.ECR_REGISTRY_BE }} \
+              --set image.tag=${{ env.IMAGE_TAG }}
+          else
+            echo "A release '$RELEASE_NAME' não existe. Instalando..."
+            helm install $RELEASE_NAME ./helm-charts/nginx-chart \
+              --namespace $NAMESPACE \
+              --set image.repository=${{ secrets.ECR_REGISTRY_BE }} \
+              --set image.tag=${{ env.IMAGE_TAG }}
+          fi
+
