@@ -1,29 +1,46 @@
+# =========================================
+# Terraform Provider Requirements
+# =========================================
+
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0" # AWS provider version
+    }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.0" # Kubernetes provider version
+    }
+  }
+}
+
+# =========================================
+# AWS Provider Configuration
+# =========================================
+
 provider "aws" {
-  region = var.aws_region
+  region = var.aws_region # AWS region defined in variables
 }
 
-# Chama os outros arquivos Terraform
-module "vpc" {
-  source = "./vpc.tf"
+# =========================================
+# Helm Provider Configuration
+# =========================================
+
+provider "helm" {
+  kubernetes {
+    host                   = data.aws_eks_cluster.eks.endpoint
+    token                  = data.aws_eks_cluster_auth.eks.token
+    cluster_ca_certificate = base64decode(data.aws_eks_cluster.eks.certificate_authority[0].data)
+  }
 }
 
-module "eks" {
-  source          = "./eks.tf"
-  vpc_id         = module.vpc.vpc_id
-  private_subnets = module.vpc.private_subnets
-}
+# =========================================
+# Kubernetes Provider Configuration
+# =========================================
 
-module "ecr" {
-  source = "./ecr.tf"
-}
-
-module "alb" {
-  source  = "./alb.tf"
-  vpc_id  = module.vpc.vpc_id
-  subnets = module.vpc.public_subnets
-}
-
-module "security_groups" {
-  source = "./security-groups.tf"
-  vpc_id = module.vpc.vpc_id
+provider "kubernetes" {
+  host                   = data.aws_eks_cluster.eks.endpoint
+  token                  = data.aws_eks_cluster_auth.eks.token
+  cluster_ca_certificate = base64decode(data.aws_eks_cluster.eks.certificate_authority[0].data)
 }
