@@ -1,0 +1,22 @@
+# Ignorar arquivos de estado do Terraform
+*.tfstate
+*.tfstate.*
+
+# Ignorar arquivos de backup gerados pelo Terraform
+*.backup
+
+# Ignorar logs e saída de execução do Terraform
+.crash.log
+
+# Ignorar arquivos de lock do Terraform (impede conflitos entre execuções)
+.terraform.lock.hcl
+
+# Ignorar diretório local do Terraform (contém módulos e providers baixados)
+.terraform/
+
+# Ignorar arquivos de plano do Terraform
+*.tfplan
+
+# Ignorar variáveis sensíveis (caso use arquivos de variáveis separadas)
+*.auto.tfvars
+*.auto.tfvars.json
