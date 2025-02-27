@@ -1,4 +1,4 @@
-replicaCount: 1
+replicaCount: w
 
 image:
   repository: nginx
@@ -17,4 +17,4 @@ ingress:
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
     alb.ingress.kubernetes.io/load-balancer-name: "nginx-alb"
-  hostname: "nginx.example.com"
+    
