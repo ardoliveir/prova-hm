@@ -53,7 +53,7 @@ jobs:
         run: |
           IMAGE_TAG=$(date +%Y%m%d%H%M%S)
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
-          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_OUTPUT  # 🔹 Isso passa a variável para o próximo job
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_OUTPUT  # Isso passa a variável para o próximo job
 
       # 🔹 Build da Imagem Docker do Backend
       - name: Build Backend Docker Image
