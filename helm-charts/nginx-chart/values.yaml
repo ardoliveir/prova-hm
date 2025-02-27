@@ -1,4 +1,4 @@
-replicaCount: w
+replicaCount: 2  # Corrigido de "w" para um número válido
 
 image:
   repository: nginx
@@ -6,7 +6,7 @@ image:
   pullPolicy: IfNotPresent
 
 service:
-  type: ClusterIP  # ALB precisa de ClusterIP ou NodePort
+  type: ClusterIP  # Para ALB com target-type: ip, deve ser ClusterIP
   port: 80
 
 ingress:
@@ -16,5 +16,3 @@ ingress:
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
-    alb.ingress.kubernetes.io/load-balancer-name: "nginx-alb"
-    
