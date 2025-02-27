@@ -13,23 +13,40 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Garantir que temos histórico para diff
 
-      # 🔹 Autenticação na AWS
+      # 🔹 Verificar se houve mudanças no backend-application
+      - name: Check for changes in backend-application
+        id: check_backend_changes
+        run: |
+          if git diff --quiet HEAD^ HEAD -- backend-application/; then
+            echo "No changes in backend-application"
+            echo "SKIP_BUILD=true" >> $GITHUB_ENV
+          else
+            echo "Changes detected in backend-application"
+            echo "SKIP_BUILD=false" >> $GITHUB_ENV
+          fi
+
+      # 🔹 Autenticação na AWS (somente se for necessário build)
       - name: Configure AWS Credentials
+        if: env.SKIP_BUILD == 'false'
         uses: aws-actions/configure-aws-credentials@v3
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}  # Certifique-se que está definido corretamente!
+          aws-region: ${{ secrets.AWS_REGION }}
 
-      # 🔹 Login no Amazon ECR (repositório do backend)
+      # 🔹 Login no Amazon ECR (somente se for necessário build)
       - name: Login to Amazon ECR
+        if: env.SKIP_BUILD == 'false'
         run: |
           aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | \
           docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY_BE }}
 
       # 🔹 Build da Imagem Docker do Backend
       - name: Build Backend Docker Image
+        if: env.SKIP_BUILD == 'false'
         run: |
           IMAGE_TAG=$(date +%Y%m%d%H%M%S)
           docker build -t ${{ secrets.ECR_REGISTRY_BE }}:$IMAGE_TAG ./backend-application
@@ -37,6 +54,7 @@ jobs:
 
       # 🔹 Push da Imagem para o ECR do Backend
       - name: Push Backend Docker Image to ECR
+        if: env.SKIP_BUILD == 'false'
         run: |
           docker push ${{ secrets.ECR_REGISTRY_BE }}:${{ env.IMAGE_TAG }}
 
@@ -48,27 +66,45 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Garantir que temos histórico para diff
 
-      # 🔹 Autenticação na AWS para acessar o EKS
+      # 🔹 Verificar se houve mudanças no Helm Chart
+      - name: Check for changes in Helm Charts
+        id: check_helm_changes
+        run: |
+          if git diff --quiet HEAD^ HEAD -- helm-charts/; then
+            echo "No changes in Helm Charts"
+            echo "SKIP_DEPLOY=true" >> $GITHUB_ENV
+          else
+            echo "Changes detected in Helm Charts"
+            echo "SKIP_DEPLOY=false" >> $GITHUB_ENV
+          fi
+
+      # 🔹 Autenticação na AWS (se necessário deploy)
       - name: Configure AWS Credentials
+        if: env.SKIP_DEPLOY == 'false'
         uses: aws-actions/configure-aws-credentials@v3
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # 🔹 Configurar acesso ao cluster EKS
+      # 🔹 Configurar acesso ao cluster EKS (se necessário deploy)
       - name: Configure kubectl
+        if: env.SKIP_DEPLOY == 'false'
         run: |
           aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name ${{ secrets.EKS_CLUSTER_NAME }}
 
-      # 🔹 Atualizar Helm values.yaml com a nova imagem do Backend
+      # 🔹 Atualizar Helm values.yaml SOMENTE SE HOUVE BUILD DE IMAGEM
       - name: Update Helm values.yaml
+        if: env.SKIP_BUILD == 'false'
         run: |
           sed -i "s|repository:.*|repository: ${{ secrets.ECR_REGISTRY_BE }}|" helm-charts/nginx-chart/values.yaml
           sed -i "s|tag:.*|tag: ${{ env.IMAGE_TAG }}|" helm-charts/nginx-chart/values.yaml
 
-      #  Deploy para o Kubernetes via Helm
+      # 🔹 Deploy para o Kubernetes via Helm (se necessário)
       - name: Deploy Backend to EKS using Helm
+        if: env.SKIP_DEPLOY == 'false'
         run: |
           helm upgrade --install backend ./helm-charts/nginx-chart --namespace default
