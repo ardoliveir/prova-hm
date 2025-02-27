@@ -10,7 +10,7 @@ jobs:
     name: Build and Push Backend Image to ECR
     runs-on: ubuntu-latest
     outputs:
-      IMAGE_TAG: ${{ steps.set_image_tag.outputs.IMAGE_TAG }}  # 🔹 Salvar o output para o deploy usar
+      IMAGE_TAG: ${{ steps.set_image_tag.outputs.IMAGE_TAG }}
 
     steps:
       - name: Checkout repository
@@ -18,7 +18,7 @@ jobs:
         with:
           fetch-depth: 0  # Garantir que temos histórico para diff
 
-      # 🔹 Verificar se houve mudanças no backend-application
+      # 🔹 Verifica se houve mudanças na aplicação (backend-application)
       - name: Check for changes in backend-application
         id: check_backend_changes
         run: |
@@ -30,7 +30,6 @@ jobs:
             echo "SKIP_BUILD=false" >> $GITHUB_ENV
           fi
 
-      # 🔹 Autenticação na AWS (somente se for necessário build)
       - name: Configure AWS Credentials
         if: env.SKIP_BUILD == 'false'
         uses: aws-actions/configure-aws-credentials@v3
@@ -39,29 +38,25 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # Login no Amazon ECR (somente se for necessário build)
       - name: Login to Amazon ECR
         if: env.SKIP_BUILD == 'false'
         run: |
           aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | \
           docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY_BE }}
 
-      # 🔹 Gerar tag da imagem (corrigindo problema da tag vazia)
       - name: Generate image tag
         if: env.SKIP_BUILD == 'false'
         id: set_image_tag
         run: |
           IMAGE_TAG=$(date +%Y%m%d%H%M%S)
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
-          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_OUTPUT  # Isso passa a variável para o próximo job
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-      # 🔹 Build da Imagem Docker do Backend
       - name: Build Backend Docker Image
         if: env.SKIP_BUILD == 'false'
         run: |
           docker build -t ${{ secrets.ECR_REGISTRY_BE }}:${{ env.IMAGE_TAG }} ./backend-application
 
-      # 🔹 Push da Imagem para o ECR do Backend
       - name: Push Backend Docker Image to ECR
         if: env.SKIP_BUILD == 'false'
         run: |
@@ -70,7 +65,7 @@ jobs:
   deploy:
     name: Deploy Backend to Kubernetes
     runs-on: ubuntu-latest
-    needs: build-and-push  # 🔹 Isso permite acessar o output do build
+    needs: build-and-push
     env:
       IMAGE_TAG: ${{ needs.build-and-push.outputs.IMAGE_TAG }}
 
@@ -80,7 +75,7 @@ jobs:
         with:
           fetch-depth: 0  # Garantir que temos histórico para diff
 
-      # 🔹 Verificar se houve mudanças no Helm Chart
+      # 🔹 Verifica se houve mudanças no Helm Chart
       - name: Check for changes in Helm Charts
         id: check_helm_changes
         run: |
@@ -92,26 +87,48 @@ jobs:
             echo "SKIP_DEPLOY=false" >> $GITHUB_ENV
           fi
 
-      # 🔹 Autenticação na AWS (se necessário deploy)
       - name: Configure AWS Credentials
-        if: env.SKIP_DEPLOY == 'false'
+        if: env.SKIP_DEPLOY == 'false' || env.SKIP_BUILD == 'false'
         uses: aws-actions/configure-aws-credentials@v3
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # 🔹 Configurar acesso ao cluster EKS (se necessário deploy)
       - name: Configure kubectl
-        if: env.SKIP_DEPLOY == 'false'
+        if: env.SKIP_DEPLOY == 'false' || env.SKIP_BUILD == 'false'
         run: |
           aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name ${{ secrets.EKS_CLUSTER_NAME }}
 
-      # 🔹 Deploy para o Kubernetes via Helm (se necessário)
-      - name: Deploy Backend to EKS using Helm
-        if: env.SKIP_DEPLOY == 'false'
+      # 🔹 Verifica se a release do Helm já existe no cluster
+      - name: Check if Helm Release Exists
+        id: check_helm_release
         run: |
-          helm upgrade --install backend ./helm-charts/nginx-chart \
-            --namespace default \
-            --set image.repository=${{ secrets.ECR_REGISTRY_BE }} \
-            --set image.tag=${{ env.IMAGE_TAG }}
+          RELEASE_NAME="backend"
+          NAMESPACE="default"
+
+          if helm status $RELEASE_NAME -n $NAMESPACE > /dev/null 2>&1; then
+            echo "HELM_RELEASE_EXISTS=true" >> $GITHUB_ENV
+          else
+            echo "HELM_RELEASE_EXISTS=false" >> $GITHUB_ENV
+          fi
+
+      # 🔹 Executa o deploy apenas se houver mudanças ou se a release não existir
+      - name: Deploy Backend to EKS using Helm
+        if: env.SKIP_DEPLOY == 'false' || env.SKIP_BUILD == 'false' || env.HELM_RELEASE_EXISTS == 'false'
+        run: |
+          RELEASE_NAME="backend"
+          NAMESPACE="default"
+
+          if [ "$HELM_RELEASE_EXISTS" = "true" ]; then
+            echo "A release '$RELEASE_NAME' já existe. Aplicando upgrade..."
+            helm upgrade $RELEASE_NAME ./helm-charts/nginx-chart \
+              --namespace $NAMESPACE \
+              --set image.repository=${{ secrets.ECR_REGISTRY_BE }} \
+              --set image.tag=${{ env.IMAGE_TAG }}
+          else
+            echo "A release '$RELEASE_NAME' não existe. Instalando..."
+            helm install $RELEASE_NAME ./helm-charts/nginx-chart \
+              --namespace $NAMESPACE \
+              --set image.repository=${{ secrets.ECR_REGISTRY_BE }} \
+              --set image.tag=${{ env.IMAGE_TAG }}
