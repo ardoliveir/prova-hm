@@ -3,7 +3,7 @@ name: Build and Deploy Backend to EKS
 on:
   push:
     branches:
-      - main
+      - main  # Executa quando há mudanças na branch main
 
 jobs:
   build-and-push:
@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       IMAGE_TAG: ${{ steps.set_image_tag.outputs.IMAGE_TAG }}
+      SKIP_BUILD: ${{ steps.check_backend_changes.outputs.SKIP_BUILD }}
 
     steps:
       - name: Checkout repository
@@ -18,7 +19,22 @@ jobs:
         with:
           fetch-depth: 0
 
+      # 🔹 Verifica se houve mudanças no backend
+      - name: Check for changes in backend-application
+        id: check_backend_changes
+        run: |
+          if git diff --quiet HEAD^ HEAD -- backend-application/; then
+            echo "No changes in backend-application"
+            echo "SKIP_BUILD=true" >> $GITHUB_ENV
+            echo "SKIP_BUILD=true" >> $GITHUB_OUTPUT
+          else
+            echo "Changes detected in backend-application"
+            echo "SKIP_BUILD=false" >> $GITHUB_ENV
+            echo "SKIP_BUILD=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Configure AWS Credentials
+        if: env.SKIP_BUILD == 'false'
         uses: aws-actions/configure-aws-credentials@v3
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -26,24 +42,38 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Login to Amazon ECR
+        if: env.SKIP_BUILD == 'false'
         run: |
           aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | \
           docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY_BE }}
 
       - name: Generate image tag
+        if: env.SKIP_BUILD == 'false'
         id: set_image_tag
         run: |
           IMAGE_TAG=$(date +%Y%m%d%H%M%S)
+          echo "$IMAGE_TAG" > image-tag.txt
+          echo "Generated IMAGE_TAG: $IMAGE_TAG"
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_OUTPUT
-          echo "Generated IMAGE_TAG: $IMAGE_TAG"
+
+      - name: Upload IMAGE_TAG as Artifact
+        if: env.SKIP_BUILD == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-tag
+          path: image-tag.txt
 
       - name: Build Backend Docker Image
+        if: env.SKIP_BUILD == 'false'
         run: |
+          IMAGE_TAG=$(cat image-tag.txt)
           docker build -t ${{ secrets.ECR_REGISTRY_BE }}:$IMAGE_TAG ./backend-application
 
       - name: Push Backend Docker Image to ECR
+        if: env.SKIP_BUILD == 'false'
         run: |
+          IMAGE_TAG=$(cat image-tag.txt)
           docker push ${{ secrets.ECR_REGISTRY_BE }}:$IMAGE_TAG
 
   deploy:
@@ -51,7 +81,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-push
     env:
-      IMAGE_TAG: ${{ needs.build-and-push.outputs.IMAGE_TAG }}
+      SKIP_BUILD: ${{ needs.build-and-push.outputs.SKIP_BUILD }}
 
     steps:
       - name: Checkout repository
@@ -59,16 +89,33 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Ensure IMAGE_TAG is set
+      - name: Download IMAGE_TAG Artifact
+        if: env.SKIP_BUILD == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          name: image-tag
+
+      - name: Load IMAGE_TAG
+        if: env.SKIP_BUILD == 'false'
         run: |
-          if [ -z "$IMAGE_TAG" ]; then
-            echo "Erro: IMAGE_TAG está vazia. Abortando..."
-            exit 1
+          IMAGE_TAG=$(cat image-tag.txt)
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          echo "Recuperado IMAGE_TAG: $IMAGE_TAG"
+
+      # 🔹 Verifica se houve mudanças no Helm Chart
+      - name: Check for changes in Helm Charts
+        id: check_helm_changes
+        run: |
+          if git diff --quiet HEAD^ HEAD -- helm-charts/; then
+            echo "No changes in Helm Charts"
+            echo "SKIP_DEPLOY=true" >> $GITHUB_ENV
+          else
+            echo "Changes detected in Helm Charts"
+            echo "SKIP_DEPLOY=false" >> $GITHUB_ENV
           fi
-        env:
-          IMAGE_TAG: ${{ env.IMAGE_TAG }}
 
       - name: Configure AWS Credentials
+        if: env.SKIP_DEPLOY == 'false' || env.SKIP_BUILD == 'false'
         uses: aws-actions/configure-aws-credentials@v3
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -76,14 +123,45 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Configure kubectl
+        if: env.SKIP_DEPLOY == 'false' || env.SKIP_BUILD == 'false'
         run: |
           aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name ${{ secrets.EKS_CLUSTER_NAME }}
 
-      - name: Deploy Backend to EKS using Helm
+      # 🔹 Verifica se a release do Helm já existe no cluster
+      - name: Check if Helm Release Exists
+        id: check_helm_release
         run: |
+          RELEASE_NAME="backend"
+          NAMESPACE="default"
+
+          if helm status $RELEASE_NAME -n $NAMESPACE > /dev/null 2>&1; then
+            echo "HELM_RELEASE_EXISTS=true" >> $GITHUB_ENV
+          else
+            echo "HELM_RELEASE_EXISTS=false" >> $GITHUB_ENV
+          fi
+
+      # 🔹 Executa o deploy se houver mudanças no código, Helm Chart ou se a release não existir
+      - name: Deploy Backend to EKS using Helm
+        if: env.SKIP_DEPLOY == 'false' || env.SKIP_BUILD == 'false' || env.HELM_RELEASE_EXISTS == 'false'
+        run: |
+          RELEASE_NAME="backend"
+          NAMESPACE="default"
+          IMAGE_TAG=$(cat image-tag.txt)
+
+          echo "Verificando release Helm..."
+          echo "HELM_RELEASE_EXISTS=${HELM_RELEASE_EXISTS}"
           echo "Deploying IMAGE_TAG: $IMAGE_TAG"
 
-          helm upgrade --install backend ./helm-charts/nginx-chart \
-            --namespace default \
-            --set image.repository=${{ secrets.ECR_REGISTRY_BE }} \
-            --set image.tag=$IMAGE_TAG
+          if [ "$HELM_RELEASE_EXISTS" = "true" ]; then
+            echo "A release '$RELEASE_NAME' já existe. Aplicando upgrade..."
+            helm upgrade $RELEASE_NAME ./helm-charts/nginx-chart \
+              --namespace $NAMESPACE \
+              --set image.repository=${{ secrets.ECR_REGISTRY_BE }} \
+              --set image.tag=$IMAGE_TAG
+          else
+            echo "A release '$RELEASE_NAME' não existe. Instalando..."
+            helm install $RELEASE_NAME ./helm-charts/nginx-chart \
+              --namespace $NAMESPACE \
+              --set image.repository=${{ secrets.ECR_REGISTRY_BE }} \
+              --set image.tag=$IMAGE_TAG
+          fi
