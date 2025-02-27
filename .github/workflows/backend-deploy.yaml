@@ -113,22 +113,34 @@ jobs:
             echo "HELM_RELEASE_EXISTS=false" >> $GITHUB_ENV
           fi
 
-      # 🔹 Executa o deploy apenas se houver mudanças ou se a release não existir
+      # 🔹 Garante que IMAGE_TAG está definida antes de fazer o deploy
+      - name: Ensure IMAGE_TAG is set
+        run: |
+          if [ -z "$IMAGE_TAG" ]; then
+            echo "Erro: IMAGE_TAG está vazia. Abortando..."
+            exit 1
+          fi
+
+      # 🔹 Executa o deploy se houver mudanças ou se a release não existir
       - name: Deploy Backend to EKS using Helm
         if: env.SKIP_DEPLOY == 'false' || env.SKIP_BUILD == 'false' || env.HELM_RELEASE_EXISTS == 'false'
         run: |
           RELEASE_NAME="backend"
           NAMESPACE="default"
 
+          echo "Verificando release Helm..."
+          echo "HELM_RELEASE_EXISTS=${HELM_RELEASE_EXISTS}"
+
           if [ "$HELM_RELEASE_EXISTS" = "true" ]; then
             echo "A release '$RELEASE_NAME' já existe. Aplicando upgrade..."
             helm upgrade $RELEASE_NAME ./helm-charts/nginx-chart \
               --namespace $NAMESPACE \
               --set image.repository=${{ secrets.ECR_REGISTRY_BE }} \
-              --set image.tag=${{ env.IMAGE_TAG }}
+              --set image.tag=$IMAGE_TAG
           else
             echo "A release '$RELEASE_NAME' não existe. Instalando..."
             helm install $RELEASE_NAME ./helm-charts/nginx-chart \
               --namespace $NAMESPACE \
               --set image.repository=${{ secrets.ECR_REGISTRY_BE }} \
-              --set image.tag=${{ env.IMAGE_TAG }}
+              --set image.tag=$IMAGE_TAG
+          fi
