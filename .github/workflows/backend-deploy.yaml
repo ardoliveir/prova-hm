@@ -3,16 +3,18 @@ name: Build and Deploy Backend to EKS
 on:
   push:
     branches:
-      - main  # Roda quando algo for alterado na branch main
+      - main
 
 jobs:
   build-and-push:
     name: Build and Push Backend Image to ECR
     runs-on: ubuntu-latest
+    outputs:
+      IMAGE_TAG: ${{ steps.set_image_tag.outputs.IMAGE_TAG }}
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -32,46 +34,30 @@ jobs:
         id: set_image_tag
         run: |
           IMAGE_TAG=$(date +%Y%m%d%H%M%S)
-          echo "$IMAGE_TAG" > image-tag.txt
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_OUTPUT
           echo "Generated IMAGE_TAG: $IMAGE_TAG"
-
-      - name: Upload IMAGE_TAG as Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: image-tag
-          path: image-tag.txt
 
       - name: Build Backend Docker Image
         run: |
-          IMAGE_TAG=$(cat image-tag.txt)
           docker build -t ${{ secrets.ECR_REGISTRY_BE }}:$IMAGE_TAG ./backend-application
 
       - name: Push Backend Docker Image to ECR
         run: |
-          IMAGE_TAG=$(cat image-tag.txt)
           docker push ${{ secrets.ECR_REGISTRY_BE }}:$IMAGE_TAG
 
   deploy:
     name: Deploy Backend to Kubernetes
     runs-on: ubuntu-latest
     needs: build-and-push
+    env:
+      IMAGE_TAG: ${{ needs.build-and-push.outputs.IMAGE_TAG }}
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Download IMAGE_TAG Artifact
-        uses: actions/download-artifact@v3
-        with:
-          name: image-tag
-
-      - name: Load IMAGE_TAG
-        run: |
-          IMAGE_TAG=$(cat image-tag.txt)
-          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
-          echo "Retrieved IMAGE_TAG: $IMAGE_TAG"
 
       - name: Ensure IMAGE_TAG is set
         run: |
@@ -95,12 +81,9 @@ jobs:
 
       - name: Deploy Backend to EKS using Helm
         run: |
-          IMAGE_TAG=$(cat image-tag.txt)
           echo "Deploying IMAGE_TAG: $IMAGE_TAG"
 
           helm upgrade --install backend ./helm-charts/nginx-chart \
             --namespace default \
             --set image.repository=${{ secrets.ECR_REGISTRY_BE }} \
             --set image.tag=$IMAGE_TAG
-        env:
-          IMAGE_TAG: ${{ env.IMAGE_TAG }}
