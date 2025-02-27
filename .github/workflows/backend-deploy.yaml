@@ -3,7 +3,7 @@ name: Build and Deploy Backend to EKS
 on:
   push:
     branches:
-      - main  # Executa quando há mudanças na branch main
+      - main
 
 jobs:
   build-and-push:
@@ -19,7 +19,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 🔹 Verifica se houve mudanças no backend
       - name: Check for changes in backend-application
         id: check_backend_changes
         run: |
@@ -32,20 +31,6 @@ jobs:
             echo "SKIP_BUILD=false" >> $GITHUB_ENV
             echo "SKIP_BUILD=false" >> $GITHUB_OUTPUT
           fi
-
-      - name: Configure AWS Credentials
-        if: env.SKIP_BUILD == 'false'
-        uses: aws-actions/configure-aws-credentials@v3
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        if: env.SKIP_BUILD == 'false'
-        run: |
-          aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | \
-          docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY_BE }}
 
       - name: Generate image tag
         if: env.SKIP_BUILD == 'false'
@@ -96,13 +81,22 @@ jobs:
           name: image-tag
 
       - name: Load IMAGE_TAG
-        if: env.SKIP_BUILD == 'false'
         run: |
-          IMAGE_TAG=$(cat image-tag.txt)
-          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
-          echo "Recuperado IMAGE_TAG: $IMAGE_TAG"
+          if [ "$SKIP_BUILD" == "false" ]; then
+            IMAGE_TAG=$(cat image-tag.txt)
+          else
+            echo "SKIP_BUILD=true. Obtendo última tag do Helm..."
+            IMAGE_TAG=$(helm get values backend -n default -o yaml | grep 'tag:' | awk '{print $2}')
+          fi
 
-      # 🔹 Verifica se houve mudanças no Helm Chart
+          if [ -z "$IMAGE_TAG" ]; then
+            echo "Erro: IMAGE_TAG está vazia. Abortando..."
+            exit 1
+          fi
+
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          echo "Usando IMAGE_TAG: $IMAGE_TAG"
+
       - name: Check for changes in Helm Charts
         id: check_helm_changes
         run: |
@@ -127,7 +121,6 @@ jobs:
         run: |
           aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name ${{ secrets.EKS_CLUSTER_NAME }}
 
-      # 🔹 Verifica se a release do Helm já existe no cluster
       - name: Check if Helm Release Exists
         id: check_helm_release
         run: |
@@ -140,13 +133,11 @@ jobs:
             echo "HELM_RELEASE_EXISTS=false" >> $GITHUB_ENV
           fi
 
-      # 🔹 Executa o deploy se houver mudanças no código, Helm Chart ou se a release não existir
       - name: Deploy Backend to EKS using Helm
         if: env.SKIP_DEPLOY == 'false' || env.SKIP_BUILD == 'false' || env.HELM_RELEASE_EXISTS == 'false'
         run: |
           RELEASE_NAME="backend"
           NAMESPACE="default"
-          IMAGE_TAG=$(cat image-tag.txt)
 
           echo "Verificando release Helm..."
           echo "HELM_RELEASE_EXISTS=${HELM_RELEASE_EXISTS}"
