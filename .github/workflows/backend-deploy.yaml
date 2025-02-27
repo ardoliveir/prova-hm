@@ -68,7 +68,7 @@ jobs:
           sed -i "s|repository:.*|repository: ${{ secrets.ECR_REGISTRY_BE }}|" helm-charts/nginx-chart/values.yaml
           sed -i "s|tag:.*|tag: ${{ env.IMAGE_TAG }}|" helm-charts/nginx-chart/values.yaml
 
-      # 🔹 Deploy para o Kubernetes via Helm
+      #  Deploy para o Kubernetes via Helm
       - name: Deploy Backend to EKS using Helm
         run: |
           helm upgrade --install backend ./helm-charts/nginx-chart --namespace default
